@@ -16,5 +16,7 @@ you can control shown columns and size
  
  by default it will show all deployments , desired and current replicas ,image info , pods name and selectors
  
+ ![alt text](https://github.com/verchol/kubemote/blob/master/docs/bash.png)
+ 
  
 
