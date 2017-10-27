@@ -4,7 +4,7 @@ Nodejs CLI that shows Kuberentes deployment extended info like pod selectors , i
 you can control shown columns and size 
 # Installation
 
-```npm install -g kubenode```
+```npm install -g kubemote```
 
 # Usage
 
