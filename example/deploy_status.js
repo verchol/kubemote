@@ -19,6 +19,12 @@ cmdLineArgs = yargs
         description: "Show one specific deployment name",
         alias: "deploy"
     })
+    .option('jobWaitPeriod', {
+        default : 20000,
+        type: "number",
+        description: "Show how long to wait in milliseconds",
+        alias: "jobwait"
+    })
     .option('namespace', {
         type: "string",
         description: "Query within a namespace",
@@ -31,11 +37,12 @@ cmdLineArgs = yargs
     { type: "array",
       description: "define columns size",
       coerce: (args)=>{
+        let colSize = {}
         let options = _(args).map((arg)=>{
           let opts = arg.split(/[,=]/)
-          return [opts[0], ~~opts[1]];
+          _.assign(colSize, _.set({}, opts[0], ~~opts[1]));
         }).value();
-        return options;
+        return colSize;
       }
     })
 
@@ -54,7 +61,7 @@ cmdLineArgs = yargs
         coerce: (args)=>{
 
           const choices =
-          {"name": 10,
+          {"name": 20,
           "desired" : 5,
           "current" : 5,
           "available" : 5,
@@ -135,22 +142,28 @@ if (cmdLineArgs.proxy){
   cmdLineArgs.protocol = cmdLineArgs.proxy.protocol;
 }
 
-_(cmdLineArgs).get("colSize", []).forEach((o)=>{
-  _.set(cmdLineArgs.col, o[0], o[1]);
+let a   = _(cmdLineArgs).get("jobWaitPeriod", []);
+ 
+_(a).forEach((v, k)=>{
+  if (_.hasIn(cmdLineArgs.colSize, k))
+  _.set(cmdLineArgs.col, k ,_.get(cmdLineArgs.colSize , k))
 })
 const progressBar = ((units)=>{
   const  Progress = require('cli-progress');
   var progressBar = new Progress.Bar({
     format: '[{bar}] {percentage}%'
 });
-progressBar.start(100, 0);
+progressBar.start(units, 0);
 progressBar.finishInterval = false;
 return progressBar;
-})(100)
+})(400)
 let progressCounter = 0;
 let progresStream = kefir.withInterval(100, emitter => {
 
-  if(progressBar.finishInterval) return emitter.end();
+  if(progressBar.finishInterval) {
+     console.log('report completed!');
+    return emitter.end();
+  }
   progressBar.update(progressCounter)
   progressCounter++;
   emitter.emit(progressCounter);
@@ -246,7 +259,8 @@ const generateDeploymentsReport = function({
 };
 const listImages = require('./probe_images').listImages;
 const reportFormatters = {
-    "json": (columns, rawReport)=> util.inspect(rawReport.map((row)=> _.pick(row, columns)), { depth: 10 }),
+    "json": (columns, rawReport)=>
+    util.inspect(rawReport.map((row)=> _.pick(row, _.keys(columns))), { depth: 10 }),
     "table": (function(){
         const timeSpanFormatter = (function(){
                 const
@@ -332,7 +346,7 @@ generateDeploymentsReport(
        console.log(' collecting image metadata ...');
       if (!cmdLineArgs["col"].images) return report;
 
-      return listImages({waitPeriod:200000}).scan((prev , next)=>{
+      return listImages({waitPeriod:cmdLineArgs.jobWaitPeriod}).scan((prev , next)=>{
         prev.push(next);
         return prev;
       }, []).toPromise().then((images)=>{
@@ -343,11 +357,15 @@ generateDeploymentsReport(
     })
     .then(_.partial(reportFormatters[cmdLineArgs["format"]], cmdLineArgs["col"] || {name:10}))
     .then((report)=>{
-      progressBar.update(100);
+      progressBar.update(200);
       progressBar.finishInterval = true;
       progressBar.stop();
       console.log(' Report is ready!');
       return report;
     })
     .then(console.log)
-    .catch(console.warn);
+    .catch((e)=>{
+      console.warn(e);
+      progressBar.finishInterval = true;
+      progressBar.stop();
+    });

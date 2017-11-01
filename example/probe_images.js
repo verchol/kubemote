@@ -49,8 +49,8 @@ module.exports.listImages= ({remote=new Kubemote({host:"127.0.0.1", port:8001, p
 
                                 stream.onEnd(stopWatch);
                                 return stream;
-                            }).takeUntilBy(kefir.later(waitPeriod, 1)),
-                            kefir.later().flatMap(()=> kefir.fromPromise(remote.deleteJob({ jobName })))   .ignoreValues()
+                            }).takeUntilBy(kefir.later(waitPeriod, 1))
+                            ,kefir.later().flatMap(()=> kefir.fromPromise(remote.deleteJob({ jobName })))   .ignoreValues()
                         ])
                 })
             )
