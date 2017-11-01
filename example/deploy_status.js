@@ -142,9 +142,10 @@ if (cmdLineArgs.proxy){
   cmdLineArgs.protocol = cmdLineArgs.proxy.protocol;
 }
 
-let a   = _(cmdLineArgs).get("jobWaitPeriod", []);
- 
-_(a).forEach((v, k)=>{
+
+let col = _(cmdLineArgs).get('col');
+console.log(col);
+_(col).forEach((v, k)=>{
   if (_.hasIn(cmdLineArgs.colSize, k))
   _.set(cmdLineArgs.col, k ,_.get(cmdLineArgs.colSize , k))
 })
