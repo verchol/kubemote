@@ -5,11 +5,24 @@ const
     yargs = require('yargs'),
     kefir = require('kefir'),
     Table = require('cli-table'),
+    Spinner = require('cli-spinner').Spinner,
     Kubemote = require('../src/kubemote');
 
+    let spinner;
+    const createSpinner = (progressMsg="processing..")=>{
+      (spinner) ? spinner.stop() : spinner;
+      spinner = new Spinner(`${progressMsg} %s`);
+      spinner.setSpinnerString(18);
+      return spinner;
+    };
 
 
 let client,cmdLineArgs;
+
+
+
+
+
 cmdLineArgs = yargs
     .version(false)
     .usage("$0 --columns [[column identifiers]] --context [context] --deploy [deployment] --namespace [namespace] --format [json|table] --host [host] --port [port] --protocol [http|https]")
@@ -144,33 +157,12 @@ if (cmdLineArgs.proxy){
 
 
 let col = _(cmdLineArgs).get('col');
-console.log(col);
+
 _(col).forEach((v, k)=>{
   if (_.hasIn(cmdLineArgs.colSize, k))
   _.set(cmdLineArgs.col, k ,_.get(cmdLineArgs.colSize , k))
 })
-const progressBar = ((units)=>{
-  const  Progress = require('cli-progress');
-  var progressBar = new Progress.Bar({
-    format: '[{bar}] {percentage}%'
-});
-progressBar.start(units, 0);
-progressBar.finishInterval = false;
-return progressBar;
-})(400)
-let progressCounter = 0;
-let progresStream = kefir.withInterval(100, emitter => {
 
-  if(progressBar.finishInterval) {
-     console.log('report completed!');
-    return emitter.end();
-  }
-  progressBar.update(progressCounter)
-  progressCounter++;
-  emitter.emit(progressCounter);
-
-});
-progresStream.onEnd(_.noop);
 
 
 const generateDeploymentsReport = function({
@@ -190,7 +182,7 @@ const generateDeploymentsReport = function({
     } catch(error){
         return Promise.reject(error);
     }
-    console.log(' collecting data from K8s cluster');
+    createSpinner('collecting data from K8s cluster...').start();
     let getDeployStream =  kefir
         .fromPromise(client.getDeployments())
         .flatMap((res)=> {
@@ -303,7 +295,7 @@ const reportFormatters = {
             "images": { caption: "Images(s)", formatter: (containers, imagesList)=>{
                (!containers) ? containers = [] : containers;
                let all = containers.slice(0,1).map(({image})=>{
-                 console.log(`image ${image}`);
+
                //let truncatedImage = _.truncate(image, { length: 80 });
 
                let tags =  [_.chain(imagesList).filter((i)=>{
@@ -343,8 +335,7 @@ const reportFormatters = {
         };
     })()
 };
-
-
+createSpinner('collecting deployments ...').start();
 generateDeploymentsReport(
     Object.assign(
         _.pick(cmdLineArgs, ["namespace", "deployment", "context"]),
@@ -353,7 +344,7 @@ generateDeploymentsReport(
     ))
 
     .then((report)=>{
-       console.log(' collecting image metadata ...');
+      createSpinner('collecting image metadata...').start();
       if (!cmdLineArgs["col"].images) return report;
 
       return listImages({waitPeriod:cmdLineArgs.jobWaitPeriod}).scan((prev , next)=>{
@@ -365,17 +356,19 @@ generateDeploymentsReport(
       })
 
     })
-    .then(_.partial(reportFormatters[cmdLineArgs["format"]], cmdLineArgs["col"] || {name:10}))
     .then((report)=>{
-      progressBar.update(200);
-      progressBar.finishInterval = true;
-      progressBar.stop();
+      createSpinner('generatingReport...').start();
+      let reportGenerator = _.partial(reportFormatters[cmdLineArgs["format"]],
+      cmdLineArgs["col"] || {name:10})
+      return reportGenerator(report);
+    })
+    .then((report)=>{
+      (spinner) ? spinner.stop() : spinner;
       console.log(' Report is ready!');
       return report;
     })
     .then(console.log)
     .catch((e)=>{
       console.warn(e);
-      progressBar.finishInterval = true;
-      progressBar.stop();
+      (spinner) ? spinner.stop() : spinner;
     });
