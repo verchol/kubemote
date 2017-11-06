@@ -203,14 +203,20 @@ const generateDeploymentsReport = function({
                             extended ?
                                 kefir
                                     .fromPromise(client.getPods(_.get(deploymentDoc, 'spec.selector.matchLabels')))
-                                    .map(({ items: podDocs }) => (
-                                        {
-                                            podNames: _(podDocs).map('metadata.name').value(),
-                                            containers: _(podDocs).map('status.containerStatuses').flatten().value()
+                                    .map(({ items: podDocs }) => {
+
+                                        return {
+                                            podNames: _.chain(podDocs).map('metadata.name').value(),
+                                            containers: _.chain(podDocs).map((v, k)=>{
+                                             let containers = _.get(v, 'status.containerStatuses', []);
+                                             if (!containers[0])
+                                                console.log('containers is not running ' + util.format(v));
+                                              return _.get(v, 'status.containerStatuses', []);
+                                            }).flatten().value()
                                         }
-                                    )) :
+                                    }) :
                                 kefir.constant({})
-                        ], _.merge);
+                        ], _.merge)
                     })
             );
         })
@@ -295,13 +301,16 @@ const reportFormatters = {
             "available":  { caption: "Available" },
             "age": { caption: "Age", formatter: timeSpanFormatter },
             "images": { caption: "Images(s)", formatter: (containers, imagesList)=>{
-
-               let all = containers.map(({image})=>{
+               (!containers) ? containers = [] : containers;
+               let all = containers.slice(0,1).map(({image})=>{
+                 console.log(`image ${image}`);
                //let truncatedImage = _.truncate(image, { length: 80 });
-               let tags =  _.filter(imagesList, (i)=>{
+
+               let tags =  [_.chain(imagesList).filter((i)=>{
                    //console.log(`${image}-${util.format(i)} , ${i.RepoTags}`);
-                  return _(i.RepoTags).some((tag)=> tag === image)
-            }).map((i)=>i.Labels);
+                   let tags = _.get(i, "RepoTags", []);
+                  return _(tags).some((tag)=> tag === image)
+            }).map((i)=>i.Labels).head().value()];
 
             return image + "\nlabels : \n======\n" + _.chain(tags)
             .head()

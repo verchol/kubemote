@@ -35,8 +35,17 @@ module.exports.listImages= ({remote=new Kubemote({host:"127.0.0.1", port:8001, p
                             kefir.fromPromise(remote.createJob(jobTemplate)).ignoreValues(),
                             kefir.fromPromise(remote.watchJob({ jobName })).flatMap((stopWatch)=>{
                                 let stream = kefir
-                                    .fromEvents(remote, 'watch')
-                                    .filter(_.matches({ object: { kind: "Job", metadata: { name: jobName }} }))
+                                    .stream(emitter=>{
+                                       remote.on('watch',(jobResult)=>{
+                                         emitter.emit(jobResult);
+                                         //emitter.end();
+                                       });
+                                       console.log(`waiting during ${waitPeriod}`);
+                                       setTimeout(_.bind(emitter.end, emitter), waitPeriod);
+
+                                    })
+
+                                    .filter(_.matches({ object: { kind: "Job", metadata: { name: jobName }} })).log('jobs')
                                     .filter((watchNotification)=> _.get(watchNotification, 'object.status.completionTime'))
                                     .take(1)
                                     .flatMap((watchNotification)=> _.get(watchNotification, 'object.status.succeeded') ?
@@ -49,9 +58,9 @@ module.exports.listImages= ({remote=new Kubemote({host:"127.0.0.1", port:8001, p
 
                                 stream.onEnd(stopWatch);
                                 return stream;
-                            }).takeUntilBy(kefir.later(waitPeriod, 1))
+                            })//.takeUntilBy(kefir.later(waitPeriod, 1))
                             ,kefir.later().flatMap(()=> kefir.fromPromise(remote.deleteJob({ jobName })))   .ignoreValues()
-                        ])
+                        ]).log()
                 })
             )
         })
