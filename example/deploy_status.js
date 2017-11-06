@@ -5,11 +5,24 @@ const
     yargs = require('yargs'),
     kefir = require('kefir'),
     Table = require('cli-table'),
+    Spinner = require('cli-spinner').Spinner,
     Kubemote = require('../src/kubemote');
 
+    let spinner;
+    const createSpinner = (progressMsg="processing..")=>{
+      (spinner) ? spinner.stop() : spinner;
+      spinner = new Spinner(`${progressMsg} %s`);
+      spinner.setSpinnerString(18);
+      return spinner;
+    };
 
 
 let client,cmdLineArgs;
+
+
+
+
+
 cmdLineArgs = yargs
     .version(false)
     .usage("$0 --columns [[column identifiers]] --context [context] --deploy [deployment] --namespace [namespace] --format [json|table] --host [host] --port [port] --protocol [http|https]")
@@ -18,6 +31,12 @@ cmdLineArgs = yargs
         type: "string",
         description: "Show one specific deployment name",
         alias: "deploy"
+    })
+    .option('jobWaitPeriod', {
+        default : 20000,
+        type: "number",
+        description: "Show how long to wait in milliseconds",
+        alias: "jobwait"
     })
     .option('namespace', {
         type: "string",
@@ -31,11 +50,12 @@ cmdLineArgs = yargs
     { type: "array",
       description: "define columns size",
       coerce: (args)=>{
+        let colSize = {}
         let options = _(args).map((arg)=>{
           let opts = arg.split(/[,=]/)
-          return [opts[0], ~~opts[1]];
+          _.assign(colSize, _.set({}, opts[0], ~~opts[1]));
         }).value();
-        return options;
+        return colSize;
       }
     })
 
@@ -54,12 +74,12 @@ cmdLineArgs = yargs
         coerce: (args)=>{
 
           const choices =
-          {"name": 10,
+          {"name": 40,
           "desired" : 5,
           "current" : 5,
           "available" : 5,
           "age" : 10,
-          "images" : 40,
+          "images" : 70,
           "pods" : 10,
           "selectors":10};
 
@@ -135,28 +155,14 @@ if (cmdLineArgs.proxy){
   cmdLineArgs.protocol = cmdLineArgs.proxy.protocol;
 }
 
-_(cmdLineArgs).get("colSize", []).forEach((o)=>{
-  _.set(cmdLineArgs.col, o[0], o[1]);
+
+let col = _(cmdLineArgs).get('col');
+
+_(col).forEach((v, k)=>{
+  if (_.hasIn(cmdLineArgs.colSize, k))
+  _.set(cmdLineArgs.col, k ,_.get(cmdLineArgs.colSize , k))
 })
-const progressBar = ((units)=>{
-  const  Progress = require('cli-progress');
-  var progressBar = new Progress.Bar({
-    format: '[{bar}] {percentage}%'
-});
-progressBar.start(100, 0);
-progressBar.finishInterval = false;
-return progressBar;
-})(100)
-let progressCounter = 0;
-let progresStream = kefir.withInterval(100, emitter => {
 
-  if(progressBar.finishInterval) return emitter.end();
-  progressBar.update(progressCounter)
-  progressCounter++;
-  emitter.emit(progressCounter);
-
-});
-progresStream.onEnd(_.noop);
 
 
 const generateDeploymentsReport = function({
@@ -176,7 +182,7 @@ const generateDeploymentsReport = function({
     } catch(error){
         return Promise.reject(error);
     }
-    console.log(' collecting data from K8s cluster');
+    createSpinner('collecting data from K8s cluster...').start();
     let getDeployStream =  kefir
         .fromPromise(client.getDeployments())
         .flatMap((res)=> {
@@ -189,14 +195,20 @@ const generateDeploymentsReport = function({
                             extended ?
                                 kefir
                                     .fromPromise(client.getPods(_.get(deploymentDoc, 'spec.selector.matchLabels')))
-                                    .map(({ items: podDocs }) => (
-                                        {
-                                            podNames: _(podDocs).map('metadata.name').value(),
-                                            containers: _(podDocs).map('status.containerStatuses').flatten().value()
+                                    .map(({ items: podDocs }) => {
+
+                                        return {
+                                            podNames: _.chain(podDocs).map('metadata.name').value(),
+                                            containers: _.chain(podDocs).map((v, k)=>{
+                                             let containers = _.get(v, 'status.containerStatuses', []);
+                                             if (!containers[0])
+                                                console.log('containers is not running ' + util.format(v));
+                                              return _.get(v, 'status.containerStatuses', []);
+                                            }).flatten().value()
                                         }
-                                    )) :
+                                    }) :
                                 kefir.constant({})
-                        ], _.merge);
+                        ], _.merge)
                     })
             );
         })
@@ -246,7 +258,8 @@ const generateDeploymentsReport = function({
 };
 const listImages = require('./probe_images').listImages;
 const reportFormatters = {
-    "json": (columns, rawReport)=> util.inspect(rawReport.map((row)=> _.pick(row, columns)), { depth: 10 }),
+    "json": (columns, rawReport)=>
+    util.inspect(rawReport.map((row)=> _.pick(row, _.keys(columns))), { depth: 10 }),
     "table": (function(){
         const timeSpanFormatter = (function(){
                 const
@@ -280,13 +293,16 @@ const reportFormatters = {
             "available":  { caption: "Available" },
             "age": { caption: "Age", formatter: timeSpanFormatter },
             "images": { caption: "Images(s)", formatter: (containers, imagesList)=>{
+               (!containers) ? containers = [] : containers;
+               let all = containers.slice(0,1).map(({image})=>{
 
-               let all = containers.map(({image})=>{
                //let truncatedImage = _.truncate(image, { length: 80 });
-               let tags =  _.filter(imagesList, (i)=>{
+
+               let tags =  [_.chain(imagesList).filter((i)=>{
                    //console.log(`${image}-${util.format(i)} , ${i.RepoTags}`);
-                  return _(i.RepoTags).some((tag)=> tag === image)
-            }).map((i)=>i.Labels);
+                   let tags = _.get(i, "RepoTags", []);
+                  return _(tags).some((tag)=> tag === image)
+            }).map((i)=>i.Labels).head().value()];
 
             return image + "\nlabels : \n======\n" + _.chain(tags)
             .head()
@@ -319,8 +335,7 @@ const reportFormatters = {
         };
     })()
 };
-
-
+createSpinner('collecting deployments ...').start();
 generateDeploymentsReport(
     Object.assign(
         _.pick(cmdLineArgs, ["namespace", "deployment", "context"]),
@@ -329,10 +344,10 @@ generateDeploymentsReport(
     ))
 
     .then((report)=>{
-       console.log(' collecting image metadata ...');
+      createSpinner('collecting image metadata...').start();
       if (!cmdLineArgs["col"].images) return report;
 
-      return listImages({waitPeriod:200000}).scan((prev , next)=>{
+      return listImages({waitPeriod:cmdLineArgs.jobWaitPeriod}).scan((prev , next)=>{
         prev.push(next);
         return prev;
       }, []).toPromise().then((images)=>{
@@ -341,13 +356,19 @@ generateDeploymentsReport(
       })
 
     })
-    .then(_.partial(reportFormatters[cmdLineArgs["format"]], cmdLineArgs["col"] || {name:10}))
     .then((report)=>{
-      progressBar.update(100);
-      progressBar.finishInterval = true;
-      progressBar.stop();
+      createSpinner('generatingReport...').start();
+      let reportGenerator = _.partial(reportFormatters[cmdLineArgs["format"]],
+      cmdLineArgs["col"] || {name:10})
+      return reportGenerator(report);
+    })
+    .then((report)=>{
+      (spinner) ? spinner.stop() : spinner;
       console.log(' Report is ready!');
       return report;
     })
     .then(console.log)
-    .catch(console.warn);
+    .catch((e)=>{
+      console.warn(e);
+      (spinner) ? spinner.stop() : spinner;
+    });

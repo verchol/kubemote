@@ -35,7 +35,23 @@ module.exports.listImages= ({remote=new Kubemote({host:"127.0.0.1", port:8001, p
                             kefir.fromPromise(remote.createJob(jobTemplate)).ignoreValues(),
                             kefir.fromPromise(remote.watchJob({ jobName })).flatMap((stopWatch)=>{
                                 let stream = kefir
-                                    .fromEvents(remote, 'watch')
+                                    .stream(emitter=>{
+                                      letId = waitPeriod;
+                                       remote.on('watch',(jobResult)=>{
+                                         emitter.emit(jobResult);
+                                         //emitter.end();
+                                       });
+                                      let timeoutId;
+                                      let retry = (waitPeriod)=>{
+                                        if (!waitPeriod)
+                                        return clearTimeout(timeoutId);
+                                        waitPeriod= -1000;
+                                        timeoutId = setTimeout(retry, 1000);
+                                      }
+                                      setTimeout(retry, 1000);
+
+                                    })
+
                                     .filter(_.matches({ object: { kind: "Job", metadata: { name: jobName }} }))
                                     .filter((watchNotification)=> _.get(watchNotification, 'object.status.completionTime'))
                                     .take(1)
@@ -49,8 +65,8 @@ module.exports.listImages= ({remote=new Kubemote({host:"127.0.0.1", port:8001, p
 
                                 stream.onEnd(stopWatch);
                                 return stream;
-                            }).takeUntilBy(kefir.later(waitPeriod, 1)),
-                            kefir.later().flatMap(()=> kefir.fromPromise(remote.deleteJob({ jobName })))   .ignoreValues()
+                            })//.takeUntilBy(kefir.later(waitPeriod, 1))
+                            ,kefir.later().flatMap(()=> kefir.fromPromise(remote.deleteJob({ jobName })))   .ignoreValues()
                         ])
                 })
             )
