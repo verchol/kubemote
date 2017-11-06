@@ -74,12 +74,12 @@ cmdLineArgs = yargs
         coerce: (args)=>{
 
           const choices =
-          {"name": 20,
+          {"name": 40,
           "desired" : 5,
           "current" : 5,
           "available" : 5,
           "age" : 10,
-          "images" : 40,
+          "images" : 70,
           "pods" : 10,
           "selectors":10};
 
